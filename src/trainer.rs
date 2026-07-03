@@ -323,31 +323,32 @@ where
         params: PhantomData,
       };
 
+      // Collect mutations first, apply after the iterator (which borrows `data`
+      // immutably) is done. Avoids the original unsafe &->&mut cast.
+      let mut pending: Vec<(bool, String)> = Vec::new();
       for (t, score) in reclassify_iter {
         if score >= P::ABBREV_LOWER_BOUND {
           if t.has_final_period() {
-            unsafe {
-              (&mut *(data as *const TrainingData as *mut TrainingData))
-                .insert_abbrev(t.typ_without_period());
-            }
+            pending.push((true, t.typ_without_period().to_string()));
           }
         } else {
           if !t.has_final_period() {
-            unsafe {
-              (&mut *(data as *const TrainingData as *mut TrainingData))
-                .remove_abbrev(t.typ_without_period());
-            }
+            pending.push((false, t.typ_without_period().to_string()));
           }
+        }
+      }
+      for (insert, s) in pending {
+        if insert {
+          data.insert_abbrev(&s);
+        } else {
+          data.remove_abbrev(&s);
         }
       }
     }
 
-    // Annotating the tokens requires an unsafe block, but it won't modify any pointers,
-    // just will modify some flags on the tokens.
+    // Token flags are stored in a Cell, so &Token is enough to mutate them.
     for t in tokens.iter() {
-      unsafe {
-        util::annotate_first_pass::<P>(&mut *(t as *const Token as *mut Token), data);
-      }
+      util::annotate_first_pass::<P>(t, data);
     }
 
     // Update or insert the orthographic context of all tokens in the document.

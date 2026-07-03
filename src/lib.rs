@@ -138,7 +138,6 @@
 //! ```
 
 #![cfg_attr(test, feature(test))]
-#![feature(proc_macro_hygiene)]
 #![warn(missing_docs)]
 
 extern crate freqdist;

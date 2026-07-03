@@ -13,7 +13,7 @@ use prelude::DefinesSentenceEndings;
 use num::Float;
 
 /// Peforms a first pass annotation on a Token.
-pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &mut Token, data: &TrainingData) {
+pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &Token, data: &TrainingData) {
   let is_split_abbrev = tok
     .tok()
     .rsplitn(1, '-')

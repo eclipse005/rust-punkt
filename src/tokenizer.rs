@@ -393,15 +393,15 @@ where
 
       // Get word tokens in the slice. If any of them has a sentence break,
       // then set the flag `has_sentence_break`.
-      for mut t in WordTokenizer::<P>::new(slice) {
+      for t in WordTokenizer::<P>::new(slice) {
         // First pass annotation can occur for each token...
-        ::util::annotate_first_pass::<P>(&mut t, self.data);
+        ::util::annotate_first_pass::<P>(&t, self.data);
 
         // Second pass annotation is a bit more finicky...It depends on the
         // previous token that was found.
         match prv {
-          Some(mut p) => {
-            annotate_second_pass::<P>(&mut t, &mut p, self.data);
+          Some(p) => {
+            annotate_second_pass::<P>(&t, &p, self.data);
 
             if p.is_sentence_break() {
               has_sentence_break = true;
@@ -522,7 +522,7 @@ where
 
 /// Performs a second pass annotation on the tokens revising any previously
 /// made decisions if new, relevant data is known.
-fn annotate_second_pass<P>(cur: &mut Token, prv: &mut Token, data: &TrainingData)
+fn annotate_second_pass<P>(cur: &Token, prv: &Token, data: &TrainingData)
 where
   P: DefinesPunctuation,
 {
