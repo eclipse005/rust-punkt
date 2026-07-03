@@ -11,12 +11,11 @@ use crate::token::Token;
 use crate::trainer::TrainingData;
 
 /// Peforms a first pass annotation on a Token.
-#[allow(clippy::suspicious_splitn)] // preserve original behavior; rsplitn(1, ..) yields the whole string
 pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &Token, data: &TrainingData) {
   let is_split_abbrev = tok
-    .tok()
-    .rsplitn(1, '-')
-    .next()
+    .tok_without_period()
+    .split('-')
+    .next_back()
     .map(|s| data.contains_abbrev(s))
     .unwrap_or(false);
 
@@ -32,7 +31,12 @@ pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &Token, data: &Traini
 }
 
 pub fn dunning_log_likelihood(count_a: f64, count_b: f64, count_ab: f64, n: f64) -> f64 {
-  let p1 = count_b / n;
+  // Clamp probabilities away from 0 and 1 to avoid log(0) = -inf producing NaN
+  // when multiplied by a zero count. Mirrors the epsilon guard NLTK added in
+  // https://github.com/nltk/nltk/pull/3244 (2023-10). For normal inputs (where
+  // the probability already lies strictly inside (0, 1)) the clamp is a no-op.
+  const EPSILON: f64 = 1e-10;
+  let p1 = (count_b / n).clamp(EPSILON, 1.0 - EPSILON);
   let p2: f64 = 0.99;
   let nullh = count_ab * p1.ln() + (count_a - count_ab) * (1.0 - p1).ln();
   let alth = count_ab * p2.ln() + (count_a - count_ab) * (1.0 - p2).ln();
@@ -41,9 +45,10 @@ pub fn dunning_log_likelihood(count_a: f64, count_b: f64, count_ab: f64, n: f64)
 }
 
 pub fn col_log_likelihood(count_a: f64, count_b: f64, count_ab: f64, n: f64) -> f64 {
-  let p = count_b / n;
-  let p1 = count_ab / count_a;
-  let p2 = (count_b - count_ab) / (n - count_a);
+  const EPSILON: f64 = 1e-10;
+  let p = (count_b / n).clamp(EPSILON, 1.0 - EPSILON);
+  let p1 = (count_ab / count_a).clamp(EPSILON, 1.0 - EPSILON);
+  let p2 = ((count_b - count_ab) / (n - count_a)).clamp(EPSILON, 1.0 - EPSILON);
 
   let s1 = count_ab * p.ln() + (count_a - count_ab) * (1.0 - p).ln();
   let s2 = (count_b - count_ab) * p.ln() + (n - count_a - count_b + count_ab) * (1.0 - p).ln();
