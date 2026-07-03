@@ -39,9 +39,8 @@ pub trait DefinesInternalPunctuation {
 /// Defines a set of characters that can not occur inside of a word.
 pub trait DefinesNonWordCharacters {
   /// The set of characters that can not occur inside of a word.
-  const NONWORD_CHARS: &'static Set<char> = &phf_set![
-    '?', '!', ')', '"', ';', '}', ']', '*', ':', '@', '\'', '(', '{', '['
-  ];
+  const NONWORD_CHARS: &'static Set<char> =
+    &phf_set!['?', '!', ')', '"', ';', '}', ']', '*', ':', '@', '\'', '(', '{', '['];
 
   /// Checks if a character is one that can not occur inside of a word.
   #[inline]
@@ -65,9 +64,8 @@ pub trait DefinesPunctuation {
 /// Defines a set of a characters that can not start a word.
 pub trait DefinesNonPrefixCharacters {
   /// The set of characters that can not start a word.
-  const NONPREFIX_CHARS: &'static Set<char> = &phf_set![
-    '(', '"', '`', '{', '[', ':', ';', '&', '#', '*', '@', ')', '}', ']', '-', ','
-  ];
+  const NONPREFIX_CHARS: &'static Set<char> =
+    &phf_set!['(', '"', '`', '{', '[', ':', ';', '&', '#', '*', '@', ')', '}', ']', '-', ','];
 
   /// Checks if a character can start a word.
   #[inline]

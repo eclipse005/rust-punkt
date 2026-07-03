@@ -7,10 +7,10 @@
 // except according to those terms.
 
 use std::cell::Cell;
-use std::ops::Deref;
 use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 
-use prelude::LetterCase;
+use crate::prelude::LetterCase;
 
 // These 6 flags only use the lower 8 bits.
 const HAS_FINAL_PERIOD: u16 = 0b0000000000000001;
@@ -36,7 +36,7 @@ pub struct Token {
 
 impl Token {
   pub fn new(slice: &str, is_el: bool, is_pg: bool, is_nl: bool) -> Token {
-    debug_assert!(slice.len() > 0);
+    debug_assert!(!slice.is_empty());
 
     let first = slice.chars().nth(0).unwrap();
     let mut has_punct = false;
@@ -71,7 +71,7 @@ impl Token {
 
       if c.is_alphabetic() || c == '_' {
         tok.set_is_non_punct(true);
-      } else if !c.is_digit(10) {
+      } else if !c.is_ascii_digit() {
         has_punct = true;
       }
     }
@@ -385,7 +385,7 @@ fn is_str_numeric(tok: &str) -> bool {
     match c {
       // A digit was found. Note this to confirm later if punctuation
       // within the number is valid or not.
-      _ if c.is_digit(10) => digit_found = true,
+      _ if c.is_ascii_digit() => digit_found = true,
       // A delimeter was found. This is valid as long as
       // a digit was also found prior.
       ',' | '.' | '-' if digit_found => (),
@@ -431,7 +431,7 @@ fn test_token_flags() {
     )
   );
 
-  let mut tok = Token::new("test", false, false, false);
+  let tok = Token::new("test", false, false, false);
 
   tok.set_is_non_punct(false);
   tok.set_is_lowercase(false);

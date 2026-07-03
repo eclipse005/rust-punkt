@@ -6,13 +6,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use token::Token;
-use trainer::TrainingData;
-use prelude::DefinesSentenceEndings;
-
-use num::Float;
+use crate::prelude::DefinesSentenceEndings;
+use crate::token::Token;
+use crate::trainer::TrainingData;
 
 /// Peforms a first pass annotation on a Token.
+#[allow(clippy::suspicious_splitn)] // preserve original behavior; rsplitn(1, ..) yields the whole string
 pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &Token, data: &TrainingData) {
   let is_split_abbrev = tok
     .tok()
@@ -21,7 +20,7 @@ pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &Token, data: &Traini
     .map(|s| data.contains_abbrev(s))
     .unwrap_or(false);
 
-  if tok.tok().len() == 1 && P::is_sentence_ending(&tok.tok().chars().nth(0).unwrap()) {
+  if tok.tok().len() == 1 && P::is_sentence_ending(&tok.tok().chars().next().unwrap()) {
     tok.set_is_sentence_break(true);
   } else if tok.has_final_period() && !tok.is_ellipsis() {
     if is_split_abbrev || data.contains_abbrev(tok.tok_without_period()) {
@@ -34,7 +33,7 @@ pub fn annotate_first_pass<P: DefinesSentenceEndings>(tok: &Token, data: &Traini
 
 pub fn dunning_log_likelihood(count_a: f64, count_b: f64, count_ab: f64, n: f64) -> f64 {
   let p1 = count_b / n;
-  let p2 = 0.99;
+  let p2: f64 = 0.99;
   let nullh = count_ab * p1.ln() + (count_a - count_ab) * (1.0 - p1).ln();
   let alth = count_ab * p2.ln() + (count_a - count_ab) * (1.0 - p2).ln();
 

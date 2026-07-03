@@ -14,16 +14,15 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use freqdist::FrequencyDistribution;
-use rustc_serialize::json::Json;
+use crate::freqdist::FrequencyDistribution;
 
-use prelude::{
+use crate::prelude::{
   DefinesNonPrefixCharacters, DefinesNonWordCharacters, OrthographicContext, OrthographyPosition,
   TrainerParameters,
 };
-use token::Token;
-use tokenizer::WordTokenizer;
-use util;
+use crate::token::Token;
+use crate::tokenizer::WordTokenizer;
+use crate::util;
 
 /// A collocation is any pair of words that has a high likelihood of appearing
 /// together.
@@ -42,7 +41,7 @@ where
 {
   #[inline(always)]
   pub fn new(l: T, r: T) -> Collocation<T> {
-    Collocation { l: l, r: r }
+    Collocation { l, r }
   }
 
   #[inline(always)]
@@ -186,12 +185,9 @@ impl TrainingData {
   fn insert_orthographic_context(&mut self, tok: &str, ctxt: OrthographicContext) -> bool {
     // `get_mut` isn't allowed here, without adding an unnecessary lifetime
     // qualifier to `tok`.
-    match self.orthographic_context.get_mut(tok) {
-      Some(c) => {
-        *c |= ctxt;
-        return false;
-      }
-      None => (),
+    if let Some(c) = self.orthographic_context.get_mut(tok) {
+      *c |= ctxt;
+      return false;
     }
 
     self.orthographic_context.insert(tok.to_string(), ctxt);
@@ -211,16 +207,16 @@ impl FromStr for TrainingData {
 
   /// Deserializes JSON and loads the data into a new TrainingData object.
   fn from_str(s: &str) -> Result<TrainingData, &'static str> {
-    match Json::from_str(s) {
-      Ok(Json::Object(mut obj)) => {
+    match serde_json::from_str::<serde_json::Value>(s) {
+      Ok(serde_json::Value::Object(mut obj)) => {
         let mut data: TrainingData = Default::default();
 
-        // Macro that gets a Json array by a path on the object. Then does a
+        // Macro that gets a JSON array by a path on the object. Then does a
         // pattern match on a specified pattern, and runs a specified action.
         macro_rules! read_json_array_data(
           ($path:expr, $mtch:pat, $act:expr) => (
             match obj.remove($path) {
-              Some(Json::Array(arr)) => {
+              Some(serde_json::Value::Array(arr)) => {
                 for x in arr.into_iter() {
                   match x {
                     $mtch => { $act; }
@@ -235,31 +231,29 @@ impl FromStr for TrainingData {
 
         read_json_array_data!(
           "abbrev_types",
-          Json::String(st),
+          serde_json::Value::String(st),
           data.insert_abbrev(&st[..])
         );
 
         read_json_array_data!(
           "sentence_starters",
-          Json::String(st),
+          serde_json::Value::String(st),
           data.insert_sentence_starter(&st[..])
         );
 
         // Load collocations, these come as an array with 2 members in them (or they should).
         // Pop them in reverse order, then insert into the proper bucket.
-        read_json_array_data!("collocations", Json::Array(mut ar), {
+        read_json_array_data!("collocations", serde_json::Value::Array(mut ar), {
           match (ar.pop(), ar.pop()) {
-            (Some(Json::String(r)), Some(Json::String(l))) => data
-              .collocations
-              .entry(l)
-              .or_insert(HashSet::new())
-              .insert(r),
+            (Some(serde_json::Value::String(r)), Some(serde_json::Value::String(l))) => {
+              data.collocations.entry(l).or_default().insert(r)
+            }
             _ => return Err("failed to parse collocations section"),
           };
         });
 
         match obj.remove("ortho_context") {
-          Some(Json::Object(obj)) => {
+          Some(serde_json::Value::Object(obj)) => {
             for (k, ctxt) in obj.into_iter() {
               ctxt
                 .as_u64()
@@ -284,6 +278,14 @@ pub struct Trainer<P> {
   params: PhantomData<P>,
 }
 
+impl<P> Default for Trainer<P> {
+  fn default() -> Self {
+    Trainer {
+      params: PhantomData,
+    }
+  }
+}
+
 impl<P> Trainer<P>
 where
   P: TrainerParameters + DefinesNonPrefixCharacters + DefinesNonWordCharacters,
@@ -291,9 +293,7 @@ where
   /// Creates a new Trainer.
   #[inline(always)]
   pub fn new() -> Trainer<P> {
-    Trainer {
-      params: PhantomData,
-    }
+    Trainer::default()
   }
 
   /// Train on a document. Does tokenization using a WordTokenizer.
@@ -317,8 +317,8 @@ where
     {
       let reclassify_iter: ReclassifyIterator<_, P> = ReclassifyIterator {
         iter: tokens.iter(),
-        data: data,
-        period_token_count: period_token_count,
+        data,
+        period_token_count,
         type_fdist: &mut type_fdist,
         params: PhantomData,
       };
@@ -384,7 +384,7 @@ where
       for (lt, rt) in consecutive_token_iter {
         match rt {
           Some(cur) if lt.has_final_period() => {
-            if is_rare_abbrev_type::<P>(&data, &type_fdist, lt, cur) {
+            if is_rare_abbrev_type::<P>(data, &type_fdist, lt, cur) {
               data.insert_abbrev(lt.typ_without_period());
             }
 
@@ -404,7 +404,7 @@ where
     {
       let ss_iter: PotentialSentenceStartersIterator<_, P> = PotentialSentenceStartersIterator {
         iter: sentence_starter_fdist.keys(),
-        sentence_break_count: sentence_break_count,
+        sentence_break_count,
         type_fdist: &type_fdist,
         sentence_starter_fdist: &sentence_starter_fdist,
         params: PhantomData,
@@ -418,19 +418,23 @@ where
     {
       let clc_iter: PotentialCollocationsIterator<_, P> = PotentialCollocationsIterator {
         iter: collocation_fdist.keys(),
-        data: &data,
+        data,
         type_fdist: &type_fdist,
         collocation_fdist: &collocation_fdist,
         params: PhantomData,
       };
 
+      // Collect mutations first, apply after the iterator (which borrows `data`
+      // immutably) is done. Avoids the original unsafe &->&mut cast.
+      let mut pending: Vec<(String, String)> = Vec::new();
       for (col, _) in clc_iter {
-        unsafe {
-          (&mut *(data as *const TrainingData as *mut TrainingData)).insert_collocation(
-            col.left().typ_without_period(),
-            col.right().typ_without_break_or_period(),
-          );
-        }
+        pending.push((
+          col.left().typ_without_period().to_string(),
+          col.right().typ_without_break_or_period().to_string(),
+        ));
+      }
+      for (l, r) in pending {
+        data.insert_collocation(&l, &r);
       }
     }
   }
@@ -445,7 +449,7 @@ fn is_rare_abbrev_type<P>(
 where
   P: TrainerParameters,
 {
-  use prelude::{BEG_UC, MID_UC};
+  use crate::prelude::{BEG_UC, MID_UC};
 
   if tok0.is_abbrev() || !tok0.is_sentence_break() {
     false
@@ -461,11 +465,7 @@ where
     } else if tok1.is_lowercase() {
       let ctxt = data.get_orthographic_context(tok1.typ_without_break_or_period());
 
-      if (ctxt & BEG_UC > 0) && !(ctxt & MID_UC > 0) {
-        true
-      } else {
-        false
-      }
+      (ctxt & BEG_UC > 0) && (ctxt & MID_UC == 0)
     } else {
       false
     }
@@ -509,7 +509,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
-    while let Some(t) = self.iter.next() {
+    for t in self.iter.by_ref() {
       if !t.is_non_punct() || t.is_numeric() {
         continue;
       }
@@ -580,7 +580,7 @@ where
           self.ctxt = OrthographyPosition::Unknown;
         }
 
-        let flag = *::prelude::ORTHO_MAP
+        let flag = *crate::prelude::ORTHO_MAP
           .get(&(self.ctxt.as_byte() | t.first_case().as_byte()))
           .unwrap_or(&0);
 
@@ -620,7 +620,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<(&'a Collocation<&'a Token>, f64)> {
-    while let Some(col) = self.iter.next() {
+    for col in self.iter.by_ref() {
       if self
         .data
         .contains_sentence_starter(col.right().typ_without_break_or_period())
@@ -677,7 +677,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<(&'a Token, f64)> {
-    while let Some(tok) = self.iter.next() {
+    for tok in self.iter.by_ref() {
       let ss_count = self.sentence_starter_fdist.get(tok);
       let typ_count =
         self.type_fdist.get(tok.typ_with_period()) + self.type_fdist.get(tok.typ_without_period());
@@ -771,49 +771,11 @@ preloaded_data!(turkish, "data/turkish.json");
 fn test_data_load_from_json_test() {
   let data: TrainingData = TrainingData::english();
 
-  assert!(data.orthographic_context.len() > 0);
-  assert!(data.abbrevs.len() > 0);
-  assert!(data.sentence_starters.len() > 0);
-  assert!(data.collocations.len() > 0);
+  assert!(!data.orthographic_context.is_empty());
+  assert!(!data.abbrevs.is_empty());
+  assert!(!data.sentence_starters.is_empty());
+  assert!(!data.collocations.is_empty());
   assert!(data.contains_sentence_starter("among"));
   assert!(data.contains_abbrev("w.va"));
   assert!(data.contains_collocation("##number##", "corrections"));
 }
-
-#[cfg(test)]
-macro_rules! bench_trainer(
-  ($name:ident, $doc:expr) => (
-    #[bench] fn $name(b: &mut ::test::Bencher) {
-      b.iter(|| {
-        let mut data = TrainingData::new();
-        let trainer: Trainer<::prelude::Standard> = Trainer::new();
-
-        trainer.train($doc, &mut data);
-      })
-    }
-  )
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_short,
-  include_str!("../test/raw/sigma-wiki.txt")
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_medium,
-  include_str!("../test/raw/npr-article-01.txt")
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_long,
-  include_str!("../test/raw/the-sayings-of-confucius.txt")
-);
-
-#[cfg(test)]
-bench_trainer!(
-  bench_trainer_very_long,
-  include_str!("../test/raw/pride-and-prejudice.txt")
-);
